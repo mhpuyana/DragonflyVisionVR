@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#05080f">
+<title>Dragonfly Vision</title>
+<style>
+/* Layout: full-bleed WebGL canvas; controls slide in from the right and disappear in Cardboard mode. */
+:root{
+  --bg:#05080f; --surface:#0e1524; --surface2:#151e33; --line:#24304a;
+  --fg:#e8eef9; --muted:#8d9ab5; --accent:#62d6e8; --accent-ink:#04121a; --warn:#ffb36b;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+  font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  overflow:hidden;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;background:#000}
+#cam{position:fixed;left:0;top:0;width:2px;height:2px;opacity:.01;pointer-events:none}
+[hidden]{display:none!important}
+
+button{font:inherit;color:inherit}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
+.btn:active{background:var(--surface2)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:focus-visible,.row:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Start screen */
+#start{position:fixed;inset:0;display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+  background:radial-gradient(120% 90% at 50% 0%,#0d1830 0%,var(--bg) 60%);overflow:auto}
+.card{width:min(520px,100%);display:grid;gap:14px}
+.card h1{margin:0;font-size:clamp(28px,6vw,40px);letter-spacing:-.02em;line-height:1.05}
+.card p{margin:0;color:var(--muted)}
+.card ol{margin:0;padding-left:1.2em;color:var(--fg);display:grid;gap:4px}
+.err{color:var(--warn);font-weight:600}
+.small{font-size:13px;color:var(--muted)}
+
+/* Floating buttons */
+.float{position:fixed;top:max(10px,env(safe-area-inset-top));z-index:5}
+#menuBtn{right:max(10px,env(safe-area-inset-right))}
+#vrBtn{right:calc(max(10px,env(safe-area-inset-right)) + 96px)}
+#fps{position:fixed;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));z-index:5;font:12px ui-monospace,Menlo,monospace;color:var(--muted);background:rgba(5,8,15,.6);padding:3px 7px;border-radius:6px}
+
+/* Panel */
+#panel{position:fixed;top:0;bottom:0;right:0;width:min(380px,92vw);z-index:8;background:rgba(10,15,27,.96);
+  border-left:1px solid var(--line);transform:translateX(100%);transition:transform .2s ease;
+  display:flex;flex-direction:column;padding-top:env(safe-area-inset-top);padding-right:env(safe-area-inset-right)}
+#panel.open{transform:none}
+.phead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+.phead b{font-size:16px}
+#pbody{overflow:auto;padding:4px 16px calc(24px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;user-select:none}
+#pbody h2{margin:20px 0 8px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;width:100%;text-align:left;
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.rt{display:grid;min-width:0}
+.rn{font-weight:650}
+.rh{font-size:12.5px;color:var(--muted)}
+kbd{font:600 12px ui-monospace,Menlo,monospace;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:2px 7px;background:var(--bg)}
+.sw{width:46px;height:28px;border-radius:14px;background:#26314b;position:relative;transition:background .15s}
+.sw i{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#c8d2e8;transition:transform .15s,background .15s}
+.row[aria-checked="true"] .sw{background:var(--accent)}
+.row[aria-checked="true"] .sw i{transform:translateX(18px);background:#fff}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg .btn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.sl{display:grid;gap:2px;margin:10px 0}
+.sl div{display:flex;justify-content:space-between;font-size:13.5px}
+.sl output{color:var(--muted);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent);margin:4px 0}
+.chk{display:flex;gap:10px;align-items:center;margin:10px 0;font-size:14px}
+.chk input{width:20px;height:20px;accent-color:var(--accent)}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.keys{font-size:13px;color:var(--muted);line-height:1.6}
+
+/* Toasts (one per eye in Cardboard mode) */
+.toast{position:fixed;z-index:6;bottom:16%;transform:translateX(-50%);padding:8px 16px;border-radius:999px;
+  background:rgba(5,8,15,.78);border:1px solid var(--line);font-weight:650;white-space:nowrap;opacity:0;transition:opacity .15s;pointer-events:none}
+.toast.show{opacity:1}
+#rotate{position:fixed;inset:0;z-index:9;display:grid;place-items:center;text-align:center;background:var(--bg);font-size:20px;padding:24px}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<video id="cam" playsinline muted autoplay></video>
+<div id="toasts"></div>
+<div id="rotate" hidden>Turn your phone sideways to use Cardboard view.</div>
+
+<section id="start">
+  <div class="card">
+    <h1>Dragonfly Vision</h1>
+    <p>Your camera, seen through a dragonfly's eyes, split for a Google Cardboard viewer.</p>
+    <ol>
+      <li>Tap Start and allow camera and motion access.</li>
+      <li>Tap Cardboard view, turn the phone sideways and slot it into the viewer.</li>
+      <li>Flip the switches on your box, or use the controls panel before you put it on.</li>
+    </ol>
+    <button id="startBtn" class="btn primary" type="button">Start camera</button>
+    <p id="startErr" class="err" hidden></p>
+    <p class="small">Camera and motion sensors only work on a secure (https) page.</p>
+  </div>
+</section>
+
+<button id="vrBtn" class="btn float" type="button" hidden>Cardboard view</button>
+<button id="menuBtn" class="btn float" type="button" hidden>Controls</button>
+<div id="fps" hidden></div>
+
+<aside id="panel" aria-label="Controls">
+  <div class="phead"><b>Controls</b><button id="closeBtn" class="btn" type="button">Close</button></div>
+  <div id="pbody"></div>
+</aside>
+
+<noscript>This page needs JavaScript.</noscript>
+
+<script>
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const canvas = $('#gl'), video = $('#cam');
+
+/* ---------- settings ---------- */
+const EFFECTS = [
+  {id:'ir',      name:'Infrared',       key:'1', on:'a', off:'A', hint:'Heat-map colours'},
+  {id:'facets',  name:'Compound eye',   key:'2', on:'b', off:'B', hint:'Hexagonal facets'},
+  {id:'blend',   name:'Frame blending', key:'3', on:'c', off:'C', hint:'Soft trails between frames'},
+  {id:'motion',  name:'Motion blur',    key:'4', on:'d', off:'D', hint:'Blurs only what moves'},
+  {id:'horizon', name:'Horizon lock',   key:'5', on:'e', off:'E', hint:'Keeps the horizon level'},
+];
+const DEFAULTS = {
+  fx:{ir:false, facets:false, blend:true, motion:true, horizon:false},
+  blendAmt:0.5, motionAmt:0.6, facet:0.08,
+  horizonAmt:1, smooth:80, crop:0.6, trim:0, flip:false,
+  k1:0.22, k2:0.06, zoom:1.0, ipd:0.43, eyeY:0.0,
+  vr:false
+};
+const SLIDERS = [
+  {group:'Effect strength', items:[
+    {id:'blendAmt', name:'Blend trail',  min:0,   max:0.9, step:0.01, fmt:v=>Math.round(v*100)+'%'},
+    {id:'motionAmt',name:'Motion blur',  min:0,   max:1.5, step:0.05, fmt:v=>Math.round(v*100)+'%'},
+    {id:'facet',    name:'Facet size',   min:0.03,max:0.2, step:0.005,fmt:v=>v.toFixed(3)},
+  ]},
+  {group:'Horizon lock', items:[
+    {id:'horizonAmt',name:'Level amount', min:0,  max:1,   step:0.05, fmt:v=>Math.round(v*100)+'%'},
+    {id:'smooth',    name:'Smoothing',    min:0,  max:400, step:10,   fmt:v=>v+' ms'},
+    {id:'crop',      name:'Edge crop',    min:0,  max:1,   step:0.05, fmt:v=>Math.round(v*100)+'%'},
+    {id:'trim',      name:'Trim',         min:-20,max:20,  step:0.5,  fmt:v=>v.toFixed(1)+'°'},
+  ], extra:'horizon'},
+  {group:'Cardboard lens', items:[
+    {id:'k1',   name:'Lens curve 1',  min:0,   max:0.6, step:0.01, fmt:v=>v.toFixed(2)},
+    {id:'k2',   name:'Lens curve 2',  min:0,   max:0.3, step:0.01, fmt:v=>v.toFixed(2)},
+    {id:'zoom', name:'Zoom',          min:0.5, max:2,   step:0.05, fmt:v=>'×'+v.toFixed(2)},
+    {id:'ipd',  name:'Eye spacing',   min:0.30,max:0.55,step:0.005,fmt:v=>Math.round(v*100)+'% of width'},
+    {id:'eyeY', name:'Eye height',    min:-0.15,max:0.15,step:0.005,fmt:v=>(v>0?'+':'')+Math.round(v*100)+'%'},
+  ]},
+];
+const STORE = 'dragonfly-vision.v1';
+let S = JSON.parse(JSON.stringify(DEFAULTS));
+try {
+  const saved = JSON.parse(localStorage.getItem(STORE) || 'null');
+  if (saved) { S = Object.assign(S, saved); S.fx = Object.assign({}, DEFAULTS.fx, saved.fx || {}); }
+} catch (e) {}
+S.vr = false;
+let saveT = 0;
+function save() {
+  clearTimeout(saveT);
+  saveT = setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) {} }, 300);
+}
+
+/* ---------- WebGL ---------- */
+const gl = canvas.getContext('webgl2', {antialias:false, alpha:false, powerPreference:'high-performance'});
+if (!gl) {
+  showStartError('This browser does not support WebGL 2. Try a recent Safari or Chrome.');
+  return;
+}
+const useFloat = !!(gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
+
+const VS = `#version 300 es
+out vec2 vUv;
+void main(){
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  vUv = p;
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+const FS_BLEND = `#version 300 es
+precision highp float;
+uniform sampler2D uCam, uAcc;
+uniform float uAlpha;
+in vec2 vUv; out vec4 o;
+void main(){
+  vec3 c = texture(uCam, vUv).rgb;
+  vec3 a = texture(uAcc, vUv).rgb;
+  o = vec4(mix(a, c, uAlpha), 1.0);
+}`;
+
+const FS_MOTION = `#version 300 es
+precision highp float;
+uniform sampler2D uImg, uCam, uPrev;
+uniform vec2 uTexel;
+uniform float uAmt;
+in vec2 vUv; out vec4 o;
+float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
+void main(){
+  float m = 0.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 d = vec2(float(i), float(j)) * uTexel * 7.0;
+      m += abs(lum(texture(uCam, vUv + d).rgb) - lum(texture(uPrev, vUv + d).rgb));
+    }
+  }
+  m /= 9.0;
+  float mask = smoothstep(0.012, 0.09, m) * uAmt;
+  vec3 sum = vec3(0.0); float ws = 0.0;
+  for (int k = -6; k <= 6; k++) {
+    float t = float(k) / 6.0;
+    float w = 1.0 - abs(t) * 0.6;
+    vec2 off = vec2(t * uTexel.x * 30.0, t * uTexel.y * 6.0) * mask;
+    sum += texture(uImg, vUv + off).rgb * w; ws += w;
+  }
+  o = vec4(sum / ws, 1.0);
+}`;
+
+const FS_FINAL = `#version 300 es
+precision highp float;
+uniform sampler2D uImg;
+uniform vec2 uCenter, uK;
+uniform float uAspect, uVR, uZoom, uImgA, uRoll, uRollZoom, uMirrorMax, uFacet, uIR;
+in vec2 vUv; out vec4 o;
+
+vec3 inferno(float t){
+  const vec3 c0=vec3(0.00021894,0.00165100,-0.01948089);
+  const vec3 c1=vec3(0.10651341,0.56395644,3.93271246);
+  const vec3 c2=vec3(11.60249308,-3.97285397,-15.94239410);
+  const vec3 c3=vec3(-41.70399613,17.43639888,44.35414519);
+  const vec3 c4=vec3(77.16293570,-33.40235894,-81.80730926);
+  const vec3 c5=vec3(-71.31942824,32.62606426,73.20951985);
+  const vec3 c6=vec3(25.13112622,-12.24266895,-23.07032500);
+  return c0+t*(c1+t*(c2+t*(c3+t*(c4+t*(c5+t*c6)))));
+}
+
+vec3 sampleImg(vec2 q){
+  float c = cos(uRoll), s = sin(uRoll);
+  vec2 r = vec2(c*q.x - s*q.y, s*q.x + c*q.y) / uRollZoom;
+  vec2 uv = vec2(0.5 + r.x * uZoom / (2.0 * uImgA), 0.5 + r.y * uZoom * 0.5);
+  vec2 over = max(abs(uv - 0.5) - 0.5, 0.0);
+  if (max(over.x, over.y) > uMirrorMax) return vec3(0.0);
+  vec2 m = abs(mod(uv + 1.0, 2.0) - 1.0);
+  return texture(uImg, m).rgb;
+}
+
+void main(){
+  vec2 p = (vUv - uCenter) * vec2(uAspect, 1.0) * 2.0;
+  vec2 q = p;
+  float vig = 1.0;
+  if (uVR > 0.5) {
+    float r2 = dot(p, p);
+    q = p * (1.0 + uK.x * r2 + uK.y * r2 * r2);
+    vig = 1.0 - smoothstep(1.0, 1.35, length(p));
+  }
+  vec3 col; float shade = 1.0;
+  if (uFacet > 0.0) {
+    vec2 g = q / uFacet;
+    const vec2 R = vec2(1.0, 1.7320508);
+    vec2 a = mod(g, R) - R * 0.5;
+    vec2 b = mod(g - R * 0.5, R) - R * 0.5;
+    vec2 gv = dot(a, a) < dot(b, b) ? a : b;
+    vec2 cq = (g - gv) * uFacet;
+    float hd = max(dot(abs(gv), normalize(vec2(1.0, 1.7320508))), abs(gv.x)) / 0.5;
+    const vec2 TAP[4] = vec2[4](vec2(0.0), vec2(0.22, 0.13), vec2(-0.22, 0.13), vec2(0.0, -0.26));
+    vec3 acc = vec3(0.0);
+    for (int i = 0; i < 4; i++) acc += sampleImg(cq + TAP[i] * uFacet);
+    col = acc / 4.0;
+    shade = (1.0 - 0.6 * smoothstep(0.62, 1.0, hd)) + 0.10 * (1.0 - smoothstep(0.0, 0.45, hd));
+  } else {
+    col = sampleImg(q);
+  }
+  if (uIR > 0.5) {
+    float l = dot(col, vec3(0.299, 0.587, 0.114));
+    l = clamp((l - 0.5) * 1.35 + 0.5, 0.0, 1.0);
+    col = clamp(inferno(l), 0.0, 1.0);
+  }
+  o = vec4(col * shade * vig, 1.0);
+}`;
+
+function compile(type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src); gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+  return sh;
+}
+function program(fs, names) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, VS));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  for (const n of names) u[n] = gl.getUniformLocation(p, n);
+  return {p, u};
+}
+let pBlend, pMotion, pFinal;
+try {
+  pBlend  = program(FS_BLEND,  ['uCam','uAcc','uAlpha']);
+  pMotion = program(FS_MOTION, ['uImg','uCam','uPrev','uTexel','uAmt']);
+  pFinal  = program(FS_FINAL,  ['uImg','uCenter','uK','uAspect','uVR','uZoom','uImgA','uRoll','uRollZoom','uMirrorMax','uFacet','uIR']);
+} catch (e) {
+  showStartError('Shader error: ' + e.message);
+  return;
+}
+gl.bindVertexArray(gl.createVertexArray());
+
+function texParams() {
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+function makeTarget(w, h, float) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  if (float) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  texParams();
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return {tex, fbo, w, h, ok};
+}
+function target(w, h) {
+  let t = useFloat ? makeTarget(w, h, true) : null;
+  if (!t || !t.ok) { if (t) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fbo); } t = makeTarget(w, h, false); }
+  return t;
+}
+function freeTarget(t) { if (t) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fbo); } }
+function makeCamTex() {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t); texParams();
+  return t;
+}
+
+/* ---------- camera ---------- */
+let stream = null, facing = 'environment';
+async function openCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error('Camera access is not available here. Open this page over https.');
+  }
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio:false,
+    video:{facingMode:{ideal:facing}, width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:60}}
+  });
+  video.srcObject = stream;
+  await video.play();
+}
+
+/* ---------- pipeline state ---------- */
+let camTex = [makeCamTex(), makeCamTex()], cur = 0;
+let acc = [null, null], rd = 0, fx = null, fxValid = false;
+let camW = 0, camH = 0, firstFrame = true, haveImage = false, lastT = -1;
+
+function allocate() {
+  camW = video.videoWidth; camH = video.videoHeight;
+  const w = Math.min(camW, 1280), h = Math.round(w * camH / camW);
+  freeTarget(acc[0]); freeTarget(acc[1]); freeTarget(fx);
+  acc = [target(w, h), target(w, h)]; fx = target(w, h);
+  rd = 0; firstFrame = true; fxValid = false;
+}
+function upload(t) {
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+}
+function bindTex(unit, tex) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); }
+
+function processFrame() {
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  if (firstFrame) { upload(camTex[0]); upload(camTex[1]); cur = 0; }
+  else { cur = 1 - cur; upload(camTex[cur]); }
+  const prev = camTex[1 - cur];
+  gl.disable(gl.BLEND);
+
+  // pass 1: frame blending into the accumulation buffer
+  const wr = 1 - rd;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, acc[wr].fbo);
+  gl.viewport(0, 0, acc[wr].w, acc[wr].h);
+  gl.useProgram(pBlend.p);
+  bindTex(0, camTex[cur]); bindTex(1, acc[rd].tex);
+  gl.uniform1i(pBlend.u.uCam, 0); gl.uniform1i(pBlend.u.uAcc, 1);
+  gl.uniform1f(pBlend.u.uAlpha, (S.fx.blend && !firstFrame) ? 1 - S.blendAmt : 1);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  rd = wr;
+
+  // pass 2: motion blur where the picture changes
+  if (S.fx.motion) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fx.fbo);
+    gl.viewport(0, 0, fx.w, fx.h);
+    gl.useProgram(pMotion.p);
+    bindTex(0, acc[rd].tex); bindTex(1, camTex[cur]); bindTex(2, prev);
+    gl.uniform1i(pMotion.u.uImg, 0); gl.uniform1i(pMotion.u.uCam, 1); gl.uniform1i(pMotion.u.uPrev, 2);
+    gl.uniform2f(pMotion.u.uTexel, 1 / fx.w, 1 / fx.h);
+    gl.uniform1f(pMotion.u.uAmt, S.motionAmt);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    fxValid = true;
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  firstFrame = false; haveImage = true;
+}
+
+/* ---------- horizon (device tilt) ---------- */
+let roll = 0, rollS = 0, rollOffset = 0, haveOri = false;
+function screenAngle() {
+  if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+  if (typeof window.orientation === 'number') return (window.orientation + 360) % 360;
+  return 0;
+}
+function onOrientation(e) {
+  if (e.beta == null || e.gamma == null) return;
+  const b = e.beta * Math.PI / 180, g = e.gamma * Math.PI / 180;
+  const ux = -Math.cos(b) * Math.sin(g), uy = Math.sin(b);   // world "up" in device axes
+  const a = screenAngle() * Math.PI / 180;
+  const sUp = ux * Math.sin(a) + uy * Math.cos(a);
+  const sRight = ux * Math.cos(a) - uy * Math.sin(a);
+  roll = Math.atan2(-sRight, sUp);                          // clockwise tilt of the device
+  haveOri = true;
+}
+const wrap = (x) => Math.atan2(Math.sin(x), Math.cos(x));
+function updateRoll(dt) {
+  const k = S.smooth <= 0 ? 1 : 1 - Math.exp(-dt / (S.smooth / 1000));
+  rollS = wrap(rollS + wrap(roll - rollS) * k);
+}
+
+/* ---------- draw ---------- */
+function drawEye(vx, vw, vh, cx, cy, aspect, vr, zoom, rollA, rollZoom) {
+  gl.viewport(vx, 0, vw, vh);
+  gl.uniform2f(pFinal.u.uCenter, cx, cy);
+  gl.uniform1f(pFinal.u.uAspect, aspect);
+  gl.uniform1f(pFinal.u.uVR, vr ? 1 : 0);
+  gl.uniform1f(pFinal.u.uZoom, zoom);
+  gl.uniform1f(pFinal.u.uRoll, rollA);
+  gl.uniform1f(pFinal.u.uRollZoom, rollZoom);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+function draw() {
+  const W = canvas.width, H = canvas.height;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  const img = (S.fx.motion && fxValid) ? fx.tex : acc[rd].tex;
+  const imgA = camW / camH;
+
+  let r = 0, rz = 1;
+  if (S.fx.horizon && haveOri) {
+    r = (S.flip ? -1 : 1) * S.horizonAmt * wrap(rollS - rollOffset) + S.trim * Math.PI / 180;
+    const ar = Math.abs(r);
+    rz = 1 + S.crop * (Math.cos(ar) + Math.sin(ar) - 1);
+  }
+  gl.useProgram(pFinal.p);
+  bindTex(0, img);
+  gl.uniform1i(pFinal.u.uImg, 0);
+  gl.uniform2f(pFinal.u.uK, S.k1, S.k2);
+  gl.uniform1f(pFinal.u.uImgA, imgA);
+  gl.uniform1f(pFinal.u.uMirrorMax, S.fx.horizon ? 0.4 : 0.0);
+  gl.uniform1f(pFinal.u.uFacet, S.fx.facets ? S.facet : 0);
+  gl.uniform1f(pFinal.u.uIR, S.fx.ir ? 1 : 0);
+
+  if (S.vr) {
+    const hw = Math.floor(W / 2), cy = 0.5 + S.eyeY, asp = hw / H;
+    drawEye(0,  hw, H, 1 - S.ipd, cy, asp, true, S.zoom, r, rz);
+    drawEye(hw, hw, H, S.ipd,     cy, asp, true, S.zoom, r, rz);
+  } else {
+    const asp = W / H;
+    const fit = asp >= imgA ? 1 : asp / imgA;       // show the whole picture
+    drawEye(0, W, H, 0.5, 0.5, asp, false, fit * S.zoom, r, rz);
+  }
+}
+
+/* ---------- loop ---------- */
+let started = false, last = performance.now(), fpsN = 0, fpsT = last;
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (!started) return;
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (video.readyState >= 2 && video.videoWidth > 0) {
+    if (video.videoWidth !== camW || video.videoHeight !== camH) allocate();
+    if (video.currentTime !== lastT) { lastT = video.currentTime; processFrame(); }
+  }
+  if (!haveImage) return;
+  updateRoll(dt);
+  draw();
+  fpsN++;
+  if (now - fpsT > 1000) { $('#fps').textContent = Math.round(fpsN * 1000 / (now - fpsT)) + ' fps'; fpsN = 0; fpsT = now; }
+}
+requestAnimationFrame(loop);
+
+/* ---------- layout ---------- */
+function layout() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.round(innerWidth * dpr), h = Math.round(innerHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  placeToasts();
+  $('#rotate').hidden = !(S.vr && innerHeight > innerWidth);
+}
+addEventListener('resize', layout);
+addEventListener('orientationchange', () => setTimeout(layout, 200));
+
+/* ---------- toasts ---------- */
+const toastBox = $('#toasts');
+const toastEls = [document.createElement('div'), document.createElement('div')];
+toastEls.forEach(t => { t.className = 'toast'; toastBox.appendChild(t); });
+function placeToasts() {
+  if (S.vr) {
+    toastEls[0].style.left = ((1 - S.ipd) * 50) + '%';
+    toastEls[1].style.left = (50 + S.ipd * 50) + '%';
+  } else {
+    toastEls[0].style.left = '50%';
+  }
+}
+let toastT = 0;
+function toast(text) {
+  placeToasts();
+  toastEls[0].textContent = toastEls[1].textContent = text;
+  toastEls[0].classList.add('show');
+  toastEls[1].classList.toggle('show', S.vr);
+  clearTimeout(toastT);
+  toastT = setTimeout(() => toastEls.forEach(t => t.classList.remove('show')), 1400);
+}
+
+/* ---------- controls ---------- */
+function setFx(id, val, announce = true) {
+  if (S.fx[id] === val) return;
+  S.fx[id] = val; save(); refreshUI();
+  if (id === 'horizon' && val && !haveOri) toast('Horizon lock: no motion data');
+  else if (announce) toast(EFFECTS.find(f => f.id === id).name + (val ? ' on' : ' off'));
+}
+function setVR(on) {
+  S.vr = on; layout(); refreshUI();
+  $('#menuBtn').hidden = on || !started; $('#vrBtn').hidden = on || !started; $('#fps').hidden = on || !started;
+  if (on) {
+    $('#panel').classList.remove('open');
+    try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(() => {}); } catch (e) {}
+    try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
+    toast('Cardboard view. Hold a tap to exit.');
+  }
+}
+function buildPanel() {
+  let h = '<h2>Effects</h2>';
+  for (const f of EFFECTS) {
+    h += `<button class="row" type="button" role="switch" aria-checked="false" data-fx="${f.id}">
+      <span class="rt"><span class="rn">${f.name}</span><span class="rh">${f.hint}</span></span>
+      <kbd>${f.key}</kbd><span class="sw"><i></i></span></button>`;
+  }
+  h += '<h2>View</h2><div class="seg"><button class="btn" type="button" data-mode="0">Preview</button><button class="btn" type="button" data-mode="1">Cardboard</button></div>';
+  for (const g of SLIDERS) {
+    h += `<h2>${g.group}</h2>`;
+    for (const s of g.items) {
+      h += `<label class="sl" for="s_${s.id}"><div><span>${s.name}</span><output id="o_${s.id}"></output></div>
+        <input id="s_${s.id}" type="range" min="${s.min}" max="${s.max}" step="${s.step}"></label>`;
+    }
+    if (g.extra === 'horizon') {
+      h += `<label class="chk" for="c_flip"><input id="c_flip" type="checkbox"><span>Reverse tilt direction</span></label>
+            <div class="btns"><button class="btn" type="button" id="levelBtn">Set level here</button><span class="small" id="oriState"></span></div>`;
+    }
+  }
+  h += `<h2>Camera</h2><div class="btns"><button class="btn" type="button" id="flipCam">Switch camera</button><button class="btn" type="button" id="resetBtn">Reset all</button></div>`;
+  h += `<h2>Switch box keys</h2><div class="keys">Toggle: 1 to 5, and 6 for Cardboard view.<br>On: a b c d e &nbsp; Off: A B C D E<br>Cardboard on: f &nbsp; off: F</div>`;
+  $('#pbody').innerHTML = h;
+
+  $('#pbody').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-fx]');
+    if (row) { setFx(row.dataset.fx, !S.fx[row.dataset.fx]); return; }
+    const mode = e.target.closest('[data-mode]');
+    if (mode) { setVR(mode.dataset.mode === '1'); return; }
+  });
+  for (const g of SLIDERS) for (const s of g.items) {
+    $('#s_' + s.id).addEventListener('input', (e) => { S[s.id] = parseFloat(e.target.value); $('#o_' + s.id).textContent = s.fmt(S[s.id]); if (s.id === 'ipd') placeToasts(); save(); });
+  }
+  $('#c_flip').addEventListener('change', (e) => { S.flip = e.target.checked; save(); });
+  $('#levelBtn').addEventListener('click', () => { rollOffset = rollS; toast('Level set'); });
+  $('#flipCam').addEventListener('click', async () => {
+    facing = facing === 'environment' ? 'user' : 'environment';
+    try { await openCamera(); } catch (err) { toast('Camera switch failed'); }
+  });
+  $('#resetBtn').addEventListener('click', () => {
+    const vr = S.vr; S = JSON.parse(JSON.stringify(DEFAULTS)); S.vr = vr; save(); refreshUI(); toast('Settings reset');
+  });
+}
+function refreshUI() {
+  for (const f of EFFECTS) {
+    const el = document.querySelector(`[data-fx="${f.id}"]`);
+    if (el) el.setAttribute('aria-checked', S.fx[f.id] ? 'true' : 'false');
+  }
+  document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.mode === '1') === S.vr)));
+  for (const g of SLIDERS) for (const s of g.items) {
+    const el = $('#s_' + s.id); if (!el) continue;
+    el.value = S[s.id]; $('#o_' + s.id).textContent = s.fmt(S[s.id]);
+  }
+  const cf = $('#c_flip'); if (cf) cf.checked = !!S.flip;
+  const os = $('#oriState'); if (os) os.textContent = haveOri ? 'Motion sensor on' : 'No motion data yet';
+}
+function togglePanel(open) {
+  const p = $('#panel'); const o = open === undefined ? !p.classList.contains('open') : open;
+  p.classList.toggle('open', o); refreshUI();
+}
+$('#menuBtn').addEventListener('click', () => togglePanel());
+$('#closeBtn').addEventListener('click', () => togglePanel(false));
+$('#vrBtn').addEventListener('click', () => setVR(true));
+
+addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  if (k === 'Escape') { if (S.vr) setVR(false); else togglePanel(false); return; }
+  for (const f of EFFECTS) {
+    if (k === f.key) { setFx(f.id, !S.fx[f.id]); return; }
+    if (k === f.on)  { setFx(f.id, true); return; }
+    if (k === f.off) { setFx(f.id, false); return; }
+  }
+  if (k === '6') setVR(!S.vr);
+  else if (k === 'f') setVR(true);
+  else if (k === 'F') setVR(false);
+});
+
+// hold a tap to leave Cardboard view (a short tap is the viewer button and does nothing)
+let holdT = 0;
+canvas.addEventListener('pointerdown', () => { if (S.vr) holdT = setTimeout(() => setVR(false), 900); });
+['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => canvas.addEventListener(ev, () => clearTimeout(holdT)));
+
+/* ---------- start ---------- */
+function showStartError(msg) {
+  const el = $('#startErr'); el.textContent = msg; el.hidden = false;
+}
+async function wake() { try { if (navigator.wakeLock) await navigator.wakeLock.request('screen'); } catch (e) {} }
+document.addEventListener('visibilitychange', () => { if (started && document.visibilityState === 'visible') wake(); });
+
+$('#startBtn').addEventListener('click', async () => {
+  $('#startErr').hidden = true;
+  // ask for motion permission first, inside the tap (iOS requires this)
+  let oriP = Promise.resolve('granted');
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    oriP = DeviceOrientationEvent.requestPermission().catch(() => 'denied');
+  }
+  try {
+    const perm = await oriP;
+    if (perm === 'granted') addEventListener('deviceorientation', onOrientation);
+    await openCamera();
+  } catch (err) {
+    showStartError(err && err.name === 'NotAllowedError'
+      ? 'Camera access was blocked. Allow it in your browser settings and try again.'
+      : 'Could not start the camera: ' + (err && err.message ? err.message : err));
+    return;
+  }
+  started = true; layout();
+  $('#start').hidden = true;
+  $('#menuBtn').hidden = false; $('#vrBtn').hidden = false; $('#fps').hidden = false;
+  wake();
+  refreshUI();
+});
+
+buildPanel(); refreshUI(); layout();
+})();
+</script>
+</body>
+</html>
